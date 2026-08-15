@@ -31,6 +31,45 @@ function attr(tag: string, name: string) {
   return match?.[1]?.trim()
 }
 
+// Phone numbers are written very differently per country. An earlier version of
+// this tool only matched "+..." and "(area) ..." formats, which silently missed
+// every UK ("020 7435 2439") and French ("04 78 42 12 34") landline and produced
+// a flood of false "no contact info" leads. Candidates are matched loosely and
+// then validated by digit count so long ID/price strings are not mistaken for
+// phone numbers.
+const PHONE_CANDIDATES = [
+  /\+\d[\d\s().\-/]{6,}\d/g, // international: +33 4 78 42 12 34
+  /\b0\d[\d\s().\-/]{6,}\d\b/g, // national trunk prefix: 020 7435 2439, 04 78 42 12 34
+  /\(\d{2,5}\)\s*\d[\d\s.\-/]{4,}\d/g, // parenthesised area code: (0161) 123 4567
+  /\b\d{3}[\s.\-]\d{3}[\s.\-]\d{4}\b/g, // US style: 415-555-2671
+]
+
+function findPhones(text: string) {
+  const found = new Set<string>()
+  for (const pattern of PHONE_CANDIDATES) {
+    for (const match of text.matchAll(pattern)) {
+      const raw = match[0].trim()
+      const digits = raw.replace(/\D/g, "")
+      // Real phone numbers land between 9 and 15 digits (ITU E.164 caps at 15).
+      if (digits.length >= 9 && digits.length <= 15) found.add(raw)
+    }
+  }
+  return [...found]
+}
+
+const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.]{2,}/g
+
+function findEmails(text: string) {
+  return [
+    ...new Set(
+      (text.match(EMAIL_RE) ?? [])
+        // Strip URL leftovers like "//mail@example.org" picked up from hrefs.
+        .map((e) => e.trim().replace(/^[^\w]+/, "").toLowerCase())
+        .filter((e) => /^[\w.+-]+@[\w-]+\.[\w.]{2,}$/.test(e))
+    ),
+  ]
+}
+
 export default defineTool({
   description:
     "Fetch a business website and return hard quality signals plus a heuristic badness score from 0-100. Use this on every candidate that has a website URL, then apply your own judgment on top of the returned signals.",
@@ -94,9 +133,30 @@ export default defineTool({
     const h1Count = (html.match(/<h1\b/gi) ?? []).length
 
     const isHttps = new URL(finalUrl).protocol === "https:"
-    const hasEmail = /[\w.+-]+@[\w-]+\.[\w.]{2,}/.test(body)
-    const hasPhone = /(\+\d[\d\s().-]{7,})|(\(\d{2,4}\)\s?\d[\d\s.-]{5,})/.test(body)
+
+    // Look in the rendered text AND in href attributes, since plenty of sites
+    // expose contact details only as tel:/mailto: links.
+    const telLinks = [...html.matchAll(/href\s*=\s*["']tel:([^"']+)["']/gi)].map(
+      (m) => decodeEntities(m[1]).trim()
+    )
+    const mailtoLinks = [
+      ...html.matchAll(/href\s*=\s*["']mailto:([^"'?]+)/gi),
+    ].map((m) => decodeEntities(m[1]).trim())
+
+    const phones = [...new Set([...telLinks, ...findPhones(body)])]
+    const emails = [...new Set([...mailtoLinks, ...findEmails(body)])]
+    const hasEmail = emails.length > 0
+    const hasPhone = phones.length > 0
+
     const hasForm = /<form\b/i.test(html)
+    // A homepage with no <form> is normal — many sites put enquiries behind a
+    // dedicated contact/booking page. Only treat it as a conversion problem when
+    // there is no route to get in touch at all.
+    const hasContactLink =
+      /href\s*=\s*["'][^"']*(contact|book|appointment|enquir|inquir|admission|visit|rendez-vous|rdv|devis)[^"']*["']/i.test(
+        html
+      )
+    const hasContactPath = hasForm || hasContactLink || phones.length > 0 || hasEmail
     const usesTables = (html.match(/<table\b/gi) ?? []).length > 2
     const hasFlash = /\.swf\b|<embed\b|shockwave/i.test(lower)
     const hasDeprecated = /<(center|font|marquee|blink|frameset)\b/i.test(lower)
@@ -173,9 +233,9 @@ export default defineTool({
       score += 12
       issues.push("No visible phone or email on the homepage")
     }
-    if (!hasForm) {
-      score += 5
-      issues.push("No contact or booking form")
+    if (!hasContactPath) {
+      score += 8
+      issues.push("No way to get in touch — no form, contact link, phone or email")
     }
     if (usesTables) {
       score += 12
@@ -226,7 +286,13 @@ export default defineTool({
       htmlKb: Math.round(bytes / 1024),
       hasEmail,
       hasPhone,
+      // Returned so the agent can see the actual matched values and avoid
+      // asserting "no contact info" when the tool clearly found some.
+      phonesFound: phones.slice(0, 5),
+      emailsFound: emails.slice(0, 5),
       hasForm,
+      hasContactLink,
+      hasContactPath,
       isParked,
       socialOnly,
       imageCount: images.length,
