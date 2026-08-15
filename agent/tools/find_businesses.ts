@@ -1,20 +1,20 @@
 import { defineTool } from "eve/tools"
 import { z } from "zod"
 
-type Place = {
-  displayName?: { text?: string }
-  formattedAddress?: string
-  nationalPhoneNumber?: string
-  websiteUri?: string
-  googleMapsUri?: string
-  rating?: number
-  userRatingCount?: number
-  businessStatus?: string
-}
-
+/**
+ * Discovery is intentionally web-search based.
+ *
+ * The Google Places API is NOT used here: Google Maps Platform terms prohibit
+ * storing Maps Content (business names, addresses, ratings) in a permanent
+ * database. Only place IDs may be kept indefinitely, and lat/lng for at most
+ * 30 days. A durable lead pipeline is exactly the warehousing that is
+ * disallowed, so this tool builds a web-search plan instead.
+ */
 export default defineTool({
   description:
-    "Find local businesses for a niche in a city using the Google Places API. If no Google Maps API key is configured, this returns a fallback instruction telling you to use your built-in web_search tool instead.",
+    "Build a web-search plan for finding local businesses in a niche and city. " +
+    "Returns a prioritised list of search queries to run with your built-in " +
+    "web_search tool. Does not call any paid API.",
   inputSchema: z.object({
     niche: z.string().describe("Business category, e.g. 'dentist', 'plumber'"),
     city: z.string().describe("City or area, e.g. 'Lyon, France'"),
@@ -22,93 +22,35 @@ export default defineTool({
       .number()
       .int()
       .min(1)
-      .max(20)
+      .max(30)
       .default(15)
-      .describe("Maximum number of businesses to return"),
+      .describe("Target number of businesses to gather before auditing"),
   }),
   async execute({ niche, city, limit }) {
-    const key = process.env.GOOGLE_MAPS_API_KEY
-
-    if (!key) {
-      return {
-        source: "fallback" as const,
-        businesses: [],
-        instruction:
-          `No GOOGLE_MAPS_API_KEY is configured, so Google Maps lookup is unavailable. ` +
-          `Use your built-in web_search tool instead: search for "${niche} ${city}" plus ` +
-          `directory queries, then extract business names, phone numbers, and website URLs ` +
-          `from the results. Audit those URLs with audit_website as usual, and pass ` +
-          `source: "web_search" when you call save_lead.`,
-      }
-    }
-
-    let response: Response
-    try {
-      response = await fetch("https://places.googleapis.com/v1/places:searchText", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "X-Goog-Api-Key": key,
-          "X-Goog-FieldMask": [
-            "places.displayName",
-            "places.formattedAddress",
-            "places.nationalPhoneNumber",
-            "places.websiteUri",
-            "places.googleMapsUri",
-            "places.rating",
-            "places.userRatingCount",
-            "places.businessStatus",
-          ].join(","),
-        },
-        body: JSON.stringify({
-          textQuery: `${niche} in ${city}`,
-          maxResultCount: Math.min(limit, 20),
-        }),
-      })
-    } catch (error) {
-      return {
-        source: "error" as const,
-        businesses: [],
-        instruction: `Google Places request failed (${
-          error instanceof Error ? error.message : "unknown error"
-        }). Fall back to your built-in web_search tool.`,
-      }
-    }
-
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "")
-      return {
-        source: "error" as const,
-        businesses: [],
-        instruction:
-          `Google Places returned HTTP ${response.status}. ${detail.slice(0, 300)} ` +
-          `Fall back to your built-in web_search tool.`,
-      }
-    }
-
-    const data = (await response.json()) as { places?: Place[] }
-    const businesses = (data.places ?? [])
-      .filter((p) => p.businessStatus !== "CLOSED_PERMANENTLY")
-      .slice(0, limit)
-      .map((p) => ({
-        name: p.displayName?.text ?? "Unknown",
-        address: p.formattedAddress ?? null,
-        phone: p.nationalPhoneNumber ?? null,
-        website: p.websiteUri ?? null,
-        mapsUrl: p.googleMapsUri ?? null,
-        rating: p.rating ?? null,
-        reviewCount: p.userRatingCount ?? null,
-        hasWebsite: Boolean(p.websiteUri),
-      }))
+    const queries = [
+      `${niche} ${city}`,
+      `${niche} ${city} contact`,
+      `best ${niche} in ${city}`,
+      `${niche} ${city} annuaire`,
+      `${niche} ${city} site officiel`,
+      `"${niche}" "${city}" -yelp -tripadvisor`,
+    ]
 
     return {
-      source: "google_maps" as const,
-      count: businesses.length,
-      businesses,
+      source: "web_search" as const,
+      target: limit,
+      queries,
       instruction:
-        "Audit each business that has a website with audit_website. Businesses with " +
-        "hasWebsite false are strong leads on their own — save them with hasWebsite: false " +
-        "and a badnessScore of 90 or above.",
+        `Run these queries with your built-in web_search tool until you have about ` +
+        `${limit} distinct ${niche} businesses in ${city}. For each result, capture the ` +
+        `business name, its own website URL (not a directory listing), and a phone ` +
+        `number or address if visible. Skip aggregator and directory domains such as ` +
+        `yelp, tripadvisor, pagesjaunes, yellowpages, facebook and doctolib — those are ` +
+        `not the business's own site, though a business that ONLY has a directory ` +
+        `listing and no real site is an excellent lead: save it with hasWebsite false ` +
+        `and a badnessScore of 90 or above. Audit every real website URL with ` +
+        `audit_website, then save qualifying businesses with save_lead using ` +
+        `source "web_search".`,
     }
   },
 })

@@ -23,7 +23,6 @@ export default defineTool({
     city: z.string().optional(),
     address: z.string().optional(),
     phone: z.string().optional(),
-    mapsUrl: z.string().optional(),
     websiteUrl: z
       .string()
       .optional()
@@ -46,7 +45,7 @@ export default defineTool({
     pitchAngle: z
       .string()
       .describe("The most persuasive thing the designer could say to this owner"),
-    source: z.enum(["google_maps", "web_search"]).default("web_search"),
+    source: z.literal("web_search").default("web_search"),
   }),
   async execute(input) {
     const domain = toDomain(input.websiteUrl) ?? `no-website:${
@@ -59,7 +58,6 @@ export default defineTool({
       city: input.city ?? null,
       address: input.address ?? null,
       phone: input.phone ?? null,
-      mapsUrl: input.mapsUrl ?? null,
       websiteUrl: input.websiteUrl ?? null,
       domain,
       rating: input.rating != null ? String(input.rating) : null,

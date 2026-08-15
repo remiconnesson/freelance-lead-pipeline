@@ -131,18 +131,6 @@ export function LeadDetail({
                       </span>
                     </span>
                   )}
-                  {lead.mapsUrl && (
-                    <a
-                      href={lead.mapsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-signal hover:underline"
-                    >
-                      <MapPin className="size-4 shrink-0" aria-hidden="true" />
-                      View on Google Maps
-                      <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
-                    </a>
-                  )}
                 </div>
               </section>
 
@@ -301,8 +289,7 @@ export function LeadDetail({
                 <Badge variant="outline" className="mr-2 font-mono text-xs">
                   {severityOf(lead.badnessScore).label}
                 </Badge>
-                Audited {new Date(lead.auditedAt).toLocaleDateString()} via{" "}
-                {lead.source === "google_maps" ? "Google Maps" : "web search"}
+                Audited {new Date(lead.auditedAt).toLocaleDateString()} via web search
               </p>
             </div>
           </>

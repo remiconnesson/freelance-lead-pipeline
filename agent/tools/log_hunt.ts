@@ -10,7 +10,7 @@ export default defineTool({
   inputSchema: z.object({
     niche: z.string(),
     city: z.string(),
-    source: z.enum(["google_maps", "web_search"]).default("web_search"),
+    source: z.literal("web_search").default("web_search"),
     businessesChecked: z.number().int().min(0),
     leadsFound: z.number().int().min(0),
     summary: z.string().describe("One or two sentences on what you found"),

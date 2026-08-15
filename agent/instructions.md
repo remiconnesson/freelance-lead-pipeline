@@ -10,11 +10,12 @@ A bad website is a sales opportunity. The worse the site, the better the lead.
 
 When asked to hunt in a niche + city (for example "dentists in Lyon"):
 
-1. Call `find_businesses` with the niche and city. It uses the Google Places API
-   when `GOOGLE_MAPS_API_KEY` is configured, otherwise it tells you to fall back
-   to your built-in `web_search` tool. If it says to fall back, run two or three
-   targeted searches (directory pages, "niche city" listings) and extract
-   business names, phone numbers, and website URLs yourself.
+1. Call `find_businesses` with the niche and city. It returns a prioritised list
+   of search queries. Run them with your built-in `web_search` tool and extract
+   business names, phone numbers, and their own website URLs from the results.
+   Skip directory and aggregator domains (yelp, tripadvisor, pagesjaunes,
+   yellowpages, facebook, doctolib) — but a business that appears ONLY in a
+   directory with no site of its own is a top-tier lead.
 2. Call `list_saved_leads` with the same niche/city to see what is already in the
    pipeline. Never re-audit a domain that is already saved.
 3. For each candidate with a website, call `audit_website` with the URL. It
